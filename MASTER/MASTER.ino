@@ -98,8 +98,10 @@ void setup() {
   // LittleFS Setup
   format_LittleFS();
 
+  // Audio Recording Setup
   i2s_init();
 
+  // UI Setup
   initiate_display();
 }
 
@@ -125,7 +127,7 @@ long int last_rec_time = millis();
 
 long int last_log_time = millis();
 
-volatile boolean gps_enabled = true;
+volatile boolean gps_enabled = false;
 
 volatile boolean recording_enabled = false;
 
@@ -215,12 +217,15 @@ void format_LittleFS() {
 
 
 
-
+/**
+ * Enables the logging of GPS data into storage on the device
+ * and updates the UI accordingly.
+ */
 void check_button_A() {
   if (M5.BtnA.wasReleased() || M5.BtnA.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
     if (!button_A_pressed) {
-      log_GPS_data();
+      gps_enabled = !gps_enabled;
       enable_gps_UI();
     }
     button_A_pressed = true;
@@ -228,6 +233,10 @@ void check_button_A() {
   }
 }
 
+/**
+ * Checks if a press on the main play/pause button has occurred and
+ * carries out the required functionality to handle a recording.
+ */
 void check_button_record() {
   TouchPoint_t pos = M5.Touch.getPressPoint();
   if (pos.x != -1) {
@@ -236,7 +245,8 @@ void check_button_record() {
       if (!button_rec_pressed) {
         if (!recording_enabled) {
           M5.Lcd.fillCircle(160, 120, 75, GREEN);
-        
+
+          prepare_audio_recording();
           
           xTaskCreate(i2s_adc, "i2s_adc", 1024 * 2, NULL, 1, NULL);
         } else {
@@ -250,6 +260,10 @@ void check_button_record() {
   }
 }
 
+/**
+ * Helper function to set the correct Audio File pointer and append
+ * data for the GPS location of where the recording was made.
+ */
 void prepare_audio_recording() {
   audioFile = LittleFS.open(AUDIO_LOCATIONS[recording_index], FILE_WRITE);
   if(!audioFile){
@@ -270,6 +284,10 @@ void prepare_audio_recording() {
   audioFile.write(header, headerSize);
 }
 
+/**
+ * Checks to see if button C was recently pressed to prevent repeated
+ * functionality on a single press.
+ */
 void check_button_C() {
   if (M5.BtnC.wasReleased() || M5.BtnC.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
@@ -336,14 +354,6 @@ void log_GPS_data() {
     }
   
     append_to_logs();
-  } else {
-    logs = LittleFS.open(LOGS_LOCATION, FILE_APPEND);
-
-    logs.print("Hello");
-    logs.print("Heeeelo");
-    logs.print("\r\n");
-    logs.print("BOOMJ");
-    logs.print("\r\n");
   }
 }
 
@@ -364,6 +374,9 @@ void append_to_logs() {
   logs.close();
 }
 
+/**
+ * Test function to print out GPS log data to the M5Core2 Display
+ */
 void print_log_data() {
   logs = LittleFS.open(LOGS_LOCATION, "r");
 
@@ -425,7 +438,7 @@ void publish_HTTP_request() {
     //If you need an HTTP request with a content type: text/plain
     http.addHeader("Content-Type", "text/plain");
 
-    http.addHeader("'Timestamp'", "Test Timestamp");
+    http.addHeader("Timestamp", "Test Timestamp");
 
 
 
@@ -564,7 +577,7 @@ void i2s_adc(void *arg)
 
 
 /**
- * Fill the memory with the corresponding WAV file header.
+ * Fills the memory with the corresponding WAV file header.
  */
 void wav_header(byte* header, int wavSize){
   header[0] = 'R';
@@ -622,7 +635,9 @@ void wav_header(byte* header, int wavSize){
 
 
 
-
+/**
+ * 
+ */
 void initiate_display() {
   M5.Lcd.fillScreen(BLACK);
 
@@ -639,8 +654,10 @@ void initiate_display() {
   M5.Lcd.printf("UPLOAD");
 }
 
+/**
+ * Updates the UI of the GPS label
+ */
 void enable_gps_UI() {
-  gps_enabled = !gps_enabled;
   M5.Lcd.setTextSize(2);
   M5.Lcd.setCursor(GPS_X, GPS_Y);
   if (gps_enabled) {
@@ -651,6 +668,10 @@ void enable_gps_UI() {
   M5.Lcd.printf("GPS"); 
 }
 
+/**
+ * Updates the UI of the Upload label depending on
+ * the status of the HTTP message
+ */
 void upload_UI(bool successful) {
   M5.Lcd.setCursor(UPLOAD_X, UPLOAD_Y);
   if (successful) {
