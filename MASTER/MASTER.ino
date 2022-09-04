@@ -26,6 +26,15 @@
 #define I2S_CHANNEL_NUM   (1)
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 
+
+// UI Definitions
+
+#define GPS_X 36
+#define GPS_Y 220
+
+#define UPLOAD_X 230
+#define UPLOAD_Y 220
+
 // Size of the WAV file header
 const int headerSize = 44;
 
@@ -38,11 +47,26 @@ const char* password = "Dyingfromexams";
 // Server that will receive the HTTP POST request
 String serverName = "https://2i5agd6rwacftajs3skgtcrlne0vqcgc.lambda-url.ap-southeast-2.on.aws/";
 
+
+
+
 // Location where GPS Logs will be stored for a single hike
 String LOGS_LOCATION = "/logs.txt";
 
 // Location where Audio Files will be stored for a single hike
 String AUDIO_LOCATION = "/recording.wav";
+
+const char* AUDIO_LOCATIONS[10] = {"/recording.wav", "/recording1.wav", "/recording2.wav", "/recording3.wav", "/recording4.wav",
+      "/recording5.wav", "/recording6.wav", "/recording7.wav", "/recording8.wav", "/recording9.wav"};
+
+volatile int recording_index = 0;
+
+float audio_latitudes[10];
+
+float audio_longitudes[10];
+
+
+      
 
 // The serial connection to the GPS device
 HardwareSerial ss(2);
@@ -52,7 +76,6 @@ static const uint32_t GPSBaud = 9600;
 
 //TinyGPS++ Global Object for retrieval of GPS data
 TinyGPSPlus gps;
-
 
 
 
@@ -74,8 +97,11 @@ void setup() {
 
   // LittleFS Setup
   format_LittleFS();
-}
 
+  i2s_init();
+
+  initiate_display();
+}
 
 
 
@@ -87,45 +113,171 @@ void setup() {
 
 bool button_A_pressed = false;
 
-bool button_B_pressed = false;
+bool button_C_pressed = false;
+
+bool button_rec_pressed = false;
 
 long int last_A_time = millis();
 
-long int last_B_time = millis();
+long int last_C_time = millis();
+
+long int last_rec_time = millis();
+
+long int last_log_time = millis();
+
+volatile boolean gps_enabled = true;
+
+volatile boolean recording_enabled = false;
 
 void loop() {
   M5.update();
 
-  if (M5.BtnA.wasReleased() || M5.BtnA.pressedFor(0, 200)) {
-    M5.Axp.SetLDOEnable(3, true);
-    if (!button_A_pressed) {
-      log_GPS_data();
-    }
-    button_A_pressed = true;
-    last_A_time = millis();
-  }
-
-  if (M5.BtnB.wasReleased() || M5.BtnB.pressedFor(0, 200)) {
-    M5.Axp.SetLDOEnable(3, true);
-    if (!button_B_pressed) {
-      publish_HTTP_request();
-    }
-    button_B_pressed = true;
-    last_B_time = millis();
-  }
-
+  check_button_A();
+  check_button_C();
+  check_button_record();
 
 
   if (last_A_time + 200 < millis()) {
     button_A_pressed = false;
   }
   
-  if (last_B_time + 200 < millis()) {
-    button_B_pressed = false;
+  if (last_C_time + 200 < millis()) {
+    button_C_pressed = false;
   }
 
-  if (last_B_time + 200 < millis() && last_A_time + 200 < millis()) {
+  if (last_rec_time + 200 < millis()) {
+    button_rec_pressed = false;
+  }
+
+  if (last_log_time + 10000 < millis()) {
+    log_GPS_data();
+    last_log_time = millis();
+  }
+
+  if (!button_C_pressed && !button_A_pressed && !button_rec_pressed) {
     M5.Axp.SetLDOEnable(3, false);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// Global variable of the Object used for Reading and Writing to the Audio file
+File audioFile;
+
+// Global variable of the Object used for Reading and Writing to the Log file
+File logs;
+
+/**
+ * Formats the LittleFS if not done so already, then it will attempt to open a new file
+ */
+void format_LittleFS() {
+  M5.Lcd.println("LittleFS format start...");
+//  LittleFS.format();  // Formatting LittleFS
+  M5.Lcd.println("LittleFS format finish");
+
+  LittleFS.begin(true);
+
+  // Clears the file to ensure that all logs are fresh
+  if (LittleFS.exists(LOGS_LOCATION)) {
+    M5.Lcd.println("CLEARING EXISTING LOG FILES");
+    LittleFS.remove(LOGS_LOCATION);
+  }
+
+  // Clears the file to ensure that the audio files are fresh
+  for (int i = 0; i < 10; i++) {
+    LittleFS.remove(AUDIO_LOCATIONS[i]);  
+  }
+
+  // Create the file to be appended to
+  logs = LittleFS.open(LOGS_LOCATION, FILE_WRITE);
+  M5.Lcd.println("CREATING NEW LOG FILES");
+  logs.close();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void check_button_A() {
+  if (M5.BtnA.wasReleased() || M5.BtnA.pressedFor(0, 200)) {
+    M5.Axp.SetLDOEnable(3, true);
+    if (!button_A_pressed) {
+      log_GPS_data();
+      enable_gps_UI();
+    }
+    button_A_pressed = true;
+    last_A_time = millis();
+  }
+}
+
+void check_button_record() {
+  TouchPoint_t pos = M5.Touch.getPressPoint();
+  if (pos.x != -1) {
+    if (pos.x > 100 && pos.x < 220 && pos.y > 80 && pos.y < 180) {
+      M5.Axp.SetLDOEnable(3, true);
+      if (!button_rec_pressed) {
+        if (!recording_enabled) {
+          M5.Lcd.fillCircle(160, 120, 75, GREEN);
+        
+          
+          xTaskCreate(i2s_adc, "i2s_adc", 1024 * 2, NULL, 1, NULL);
+        } else {
+          M5.Lcd.fillCircle(160, 120, 75, 0x7bef);
+        }
+        recording_enabled = !recording_enabled;
+      }
+      button_rec_pressed = true;
+      last_rec_time = millis();
+    }
+  }
+}
+
+void prepare_audio_recording() {
+  audioFile = LittleFS.open(AUDIO_LOCATIONS[recording_index], FILE_WRITE);
+  if(!audioFile){
+    Serial.println("File is not available!");
+  }
+
+//  if (gps.location.isValid()) {
+    smart_delay(0);
+    audio_latitudes[recording_index] = gps.location.lat();
+  
+    smart_delay(0);
+    audio_longitudes[recording_index] = gps.location.lng();
+//  }
+
+  byte header[headerSize];
+  wav_header(header, FLASH_RECORD_SIZE);
+
+  audioFile.write(header, headerSize);
+}
+
+void check_button_C() {
+  if (M5.BtnC.wasReleased() || M5.BtnC.pressedFor(0, 200)) {
+    M5.Axp.SetLDOEnable(3, true);
+    if (!button_C_pressed) {
+      publish_HTTP_request();
+    }
+    button_C_pressed = true;
+    last_C_time = millis();
   }
 }
 
@@ -159,15 +311,12 @@ char tme[16];
 // Current Date used for logs
 char dte[16];
 
-// Global variable of the Object used for Reading and Writing to the Log file
-File logs;
-
 /**
  * Stores the GPS data in a text file for later retrieval and posting to AWS Lambda
  */
 void log_GPS_data() {
   smart_delay(0);
-  if (gps.location.isValid()) {
+  if (gps.location.isValid() && gps_enabled) {
     smart_delay(0);
     TinyGPSDate d = gps.date;
     TinyGPSTime t = gps.time;
@@ -187,16 +336,22 @@ void log_GPS_data() {
     }
   
     append_to_logs();
-    M5.Lcd.print("S");
+  } else {
+    logs = LittleFS.open(LOGS_LOCATION, FILE_APPEND);
+
+    logs.print("Hello");
+    logs.print("Heeeelo");
+    logs.print("\r\n");
+    logs.print("BOOMJ");
+    logs.print("\r\n");
   }
-  M5.Lcd.print("A");
 }
 
 /**
  * Adds the updated GPS values to the file at location LOGS_LOCATION
  */
 void append_to_logs() {
-  logs = LittleFS.open(LOGS_LOCATION, "a");
+  logs = LittleFS.open(LOGS_LOCATION, FILE_APPEND);
 
   char lineBuffer[30];
   sprintf(lineBuffer, "%f,%f,", lat, lng);
@@ -227,50 +382,6 @@ void print_log_data() {
 
 
 
-
-
-
-
-
-
-
-
-// Global variable of the Object used for Reading and Writing to the Audio file
-File audioFile;
-
-/**
- * Formats the LittleFS if not done so already, then it will attempt to open a new file
- */
-void format_LittleFS() {
-  M5.Lcd.println("LittleFS format start...");
-//  LittleFS.format();  // Formatting LittleFS
-  M5.Lcd.println("LittleFS format finish");
-
-  LittleFS.begin(true);
-
-  // Clears the file to ensure that all logs are fresh
-  if (LittleFS.exists(LOGS_LOCATION)) {
-    M5.Lcd.println("CLEARING EXISTING LOG FILES");
-    LittleFS.remove(LOGS_LOCATION);
-  }
-
-  // Clears the file to ensure that the audio files are fresh
-  LittleFS.remove(AUDIO_LOCATION);
-  audioFile = LittleFS.open(AUDIO_LOCATION, FILE_WRITE);
-  if(!audioFile){
-    M5.Lcd.println("CLEARING EXISTING AUDIO FILES");
-  }
-
-  byte header[headerSize];
-  wav_header(header, FLASH_RECORD_SIZE);
-
-  audioFile.write(header, headerSize);
-
-  // Create the file to be appended to
-  logs = LittleFS.open(LOGS_LOCATION, FILE_WRITE);
-  M5.Lcd.println("CREATING NEW LOG FILES");
-  logs.close();
-}
 
 
 
@@ -314,6 +425,9 @@ void publish_HTTP_request() {
     //If you need an HTTP request with a content type: text/plain
     http.addHeader("Content-Type", "text/plain");
 
+    http.addHeader("'Timestamp'", "Test Timestamp");
+
+
 
     
 
@@ -337,9 +451,8 @@ void publish_HTTP_request() {
     Serial.println(httpResponseCode);
       
     // End HTTP Connection
-
-    M5.Lcd.print("SENT");
-    M5.Lcd.print(httpResponseCode);
+    upload_UI(httpResponseCode == 200);
+    
     http.end();
   } else {
     Serial.println("WiFi Disconnected");
@@ -415,33 +528,38 @@ void i2s_adc_data_scale(uint8_t * d_buff, uint8_t* s_buff, uint32_t len)
 void i2s_adc(void *arg)
 {
     
-    int i2s_read_len = I2S_READ_LEN;
-    int flash_wr_size = 0;
-    size_t bytes_read;
+  int i2s_read_len = I2S_READ_LEN;
+  int flash_wr_size = 0;
+  size_t bytes_read;
 
-    char* i2s_read_buff = (char*) calloc(i2s_read_len, sizeof(char));
-    uint8_t* flash_write_buff = (uint8_t*) calloc(i2s_read_len, sizeof(char));
+  char* i2s_read_buff = (char*) calloc(i2s_read_len, sizeof(char));
+  uint8_t* flash_write_buff = (uint8_t*) calloc(i2s_read_len, sizeof(char));
 
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+  
+  Serial.println(" *** Recording Start *** ");
+  
+  while (flash_wr_size < FLASH_RECORD_SIZE && recording_enabled) {
+    //read data from I2S bus, in this case, from ADC.
     i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-    
-    Serial.println(" *** Recording Start *** ");
-    while (flash_wr_size < FLASH_RECORD_SIZE) {
-        //read data from I2S bus, in this case, from ADC.
-        i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-        //example_disp_buf((uint8_t*) i2s_read_buff, 64);
-        //save original data from I2S(ADC) into flash.
-        i2s_adc_data_scale(flash_write_buff, (uint8_t*)i2s_read_buff, i2s_read_len);
-        audioFile.write((const byte*) i2s_read_buff, i2s_read_len);
-        flash_wr_size += i2s_read_len;
-    }
-    audioFile.close();
+    //example_disp_buf((uint8_t*) i2s_read_buff, 64);
+    //save original data from I2S(ADC) into flash.
+    i2s_adc_data_scale(flash_write_buff, (uint8_t*)i2s_read_buff, i2s_read_len);
+    audioFile.write((const byte*) i2s_read_buff, i2s_read_len);
+    flash_wr_size += i2s_read_len;
+  }
+  audioFile.close();
 
-    free(i2s_read_buff);
-    i2s_read_buff = NULL;
-    free(flash_write_buff);
-    flash_write_buff = NULL;
-    
-    vTaskDelete(NULL);
+  free(i2s_read_buff);
+  i2s_read_buff = NULL;
+  free(flash_write_buff);
+  flash_write_buff = NULL;
+
+  recording_index += 1;
+  Serial.println(" *** Recording Finish *** ");
+  
+  vTaskDelete(NULL);
 }
 
 
@@ -496,6 +614,54 @@ void wav_header(byte* header, int wavSize){
   header[43] = (byte)((wavSize >> 24) & 0xFF);
 
 }
+
+
+
+
+
+
+
+
+
+void initiate_display() {
+  M5.Lcd.fillScreen(BLACK);
+
+  M5.Lcd.setCursor(127, 15);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.printf("RECORD");
+  M5.Lcd.fillCircle(160, 120, 75, 0x7bef);
+
+  enable_gps_UI();
+
+  M5.Lcd.setCursor(UPLOAD_X, UPLOAD_Y); 
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.printf("UPLOAD");
+}
+
+void enable_gps_UI() {
+  gps_enabled = !gps_enabled;
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setCursor(GPS_X, GPS_Y);
+  if (gps_enabled) {
+    M5.Lcd.setTextColor(GREEN);
+  } else {
+    M5.Lcd.setTextColor(RED);
+  }
+  M5.Lcd.printf("GPS"); 
+}
+
+void upload_UI(bool successful) {
+  M5.Lcd.setCursor(UPLOAD_X, UPLOAD_Y);
+  if (successful) {
+    M5.Lcd.setTextColor(GREEN);
+  } else {
+    M5.Lcd.setTextColor(RED);
+  }
+  M5.Lcd.printf("UPLOAD");
+}
+
+
 
 
 
