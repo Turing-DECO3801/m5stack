@@ -9,10 +9,25 @@
 #include <TinyGPSPlus.h>
 
 // File Storage Library
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
+// Audio Recording Library and Definitions
 
+#include <driver/i2s.h>
 
+#define I2S_WS 0
+#define I2S_SD 34
+#define I2S_SCK 12
+#define I2S_PORT I2S_NUM_0
+#define I2S_SAMPLE_RATE   (16000)
+#define I2S_SAMPLE_BITS   (16)
+#define I2S_READ_LEN      (16 * 1024)
+#define RECORD_TIME       (20) //Seconds
+#define I2S_CHANNEL_NUM   (1)
+#define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
+
+// Size of the WAV file header
+const int headerSize = 44;
 
 
 
@@ -25,6 +40,9 @@ String serverName = "https://2i5agd6rwacftajs3skgtcrlne0vqcgc.lambda-url.ap-sout
 
 // Location where GPS Logs will be stored for a single hike
 String LOGS_LOCATION = "/logs.txt";
+
+// Location where Audio Files will be stored for a single hike
+String AUDIO_LOCATION = "/recording.wav";
 
 // The serial connection to the GPS device
 HardwareSerial ss(2);
@@ -54,9 +72,15 @@ void setup() {
   // GPS Setup
   ss.begin(GPSBaud, SERIAL_8N1, 33, 32);
 
-  // SPIFFS Setup
-  formatSPIFFS();
+  // LittleFS Setup
+  format_LittleFS();
 }
+
+
+
+
+
+
 
 
 
@@ -84,7 +108,7 @@ void loop() {
   if (M5.BtnB.wasReleased() || M5.BtnB.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
     if (!button_B_pressed) {
-      public_HTTP_request();
+      publish_HTTP_request();
     }
     button_B_pressed = true;
     last_B_time = millis();
@@ -93,15 +117,24 @@ void loop() {
 
 
   if (last_A_time + 200 < millis()) {
-    M5.Axp.SetLDOEnable(3, false);
     button_A_pressed = false;
   }
   
   if (last_B_time + 200 < millis()) {
-    M5.Axp.SetLDOEnable(3, false);
     button_B_pressed = false;
   }
+
+  if (last_B_time + 200 < millis() && last_A_time + 200 < millis()) {
+    M5.Axp.SetLDOEnable(3, false);
+  }
 }
+
+
+
+
+
+
+
 
 
 
@@ -133,16 +166,16 @@ File logs;
  * Stores the GPS data in a text file for later retrieval and posting to AWS Lambda
  */
 void log_GPS_data() {
-  smartDelay(0);
+  smart_delay(0);
   if (gps.location.isValid()) {
-    smartDelay(0);
+    smart_delay(0);
     TinyGPSDate d = gps.date;
     TinyGPSTime t = gps.time;
     
-    smartDelay(0);
+    smart_delay(0);
     lat = gps.location.lat();
     
-    smartDelay(0);
+    smart_delay(0);
     lng = gps.location.lng();
   
     
@@ -163,7 +196,7 @@ void log_GPS_data() {
  * Adds the updated GPS values to the file at location LOGS_LOCATION
  */
 void append_to_logs() {
-  logs = SPIFFS.open(LOGS_LOCATION, "a");
+  logs = LittleFS.open(LOGS_LOCATION, "a");
 
   char lineBuffer[30];
   sprintf(lineBuffer, "%f,%f,", lat, lng);
@@ -177,7 +210,7 @@ void append_to_logs() {
 }
 
 void print_log_data() {
-  logs = SPIFFS.open(LOGS_LOCATION, "r");
+  logs = LittleFS.open(LOGS_LOCATION, "r");
 
   uint8_t* log_data = (uint8_t *)ps_calloc(logs.size() + 1, sizeof(char));
   int i = 0;
@@ -197,24 +230,44 @@ void print_log_data() {
 
 
 
-/**
- * Formats the SPIFFS if not done so already, then it will attempt to open a new file
- */
-void formatSPIFFS() {
-  M5.Lcd.println("SPIFFS format start...");
-  SPIFFS.format();  // Formatting SPIFFS
-  M5.Lcd.println("SPIFFS format finish");
 
-  SPIFFS.begin(true);
+
+
+
+
+// Global variable of the Object used for Reading and Writing to the Audio file
+File audioFile;
+
+/**
+ * Formats the LittleFS if not done so already, then it will attempt to open a new file
+ */
+void format_LittleFS() {
+  M5.Lcd.println("LittleFS format start...");
+//  LittleFS.format();  // Formatting LittleFS
+  M5.Lcd.println("LittleFS format finish");
+
+  LittleFS.begin(true);
 
   // Clears the file to ensure that all logs are fresh
-  if (SPIFFS.exists(LOGS_LOCATION)) {
+  if (LittleFS.exists(LOGS_LOCATION)) {
     M5.Lcd.println("CLEARING EXISTING LOG FILES");
-    SPIFFS.remove(LOGS_LOCATION);
+    LittleFS.remove(LOGS_LOCATION);
   }
 
+  // Clears the file to ensure that the audio files are fresh
+  LittleFS.remove(AUDIO_LOCATION);
+  audioFile = LittleFS.open(AUDIO_LOCATION, FILE_WRITE);
+  if(!audioFile){
+    M5.Lcd.println("CLEARING EXISTING AUDIO FILES");
+  }
+
+  byte header[headerSize];
+  wav_header(header, FLASH_RECORD_SIZE);
+
+  audioFile.write(header, headerSize);
+
   // Create the file to be appended to
-  logs = SPIFFS.open(LOGS_LOCATION, FILE_WRITE);
+  logs = LittleFS.open(LOGS_LOCATION, FILE_WRITE);
   M5.Lcd.println("CREATING NEW LOG FILES");
   logs.close();
 }
@@ -239,7 +292,7 @@ volatile bool wifi_connection_attempted = false;
  * 
  * The POST request will send data for GPS Logs and the WAV sound files.
  */
-void public_HTTP_request() {
+void publish_HTTP_request() {
 
   if (!wifi_connection_attempted) {
     WiFi.begin(ssid, password);
@@ -264,7 +317,7 @@ void public_HTTP_request() {
 
     
 
-    logs = SPIFFS.open(LOGS_LOCATION, "r");
+    logs = LittleFS.open(LOGS_LOCATION, "r");
   
     uint8_t* log_data = (uint8_t *)ps_calloc(logs.size() + 1, sizeof(char));
     int i = 0;
@@ -300,10 +353,102 @@ void public_HTTP_request() {
 
 
 
+
+
+
+
+
+
+
+/**
+ * Initialises the I2S Audio module based on the configurations that are
+ * suitable for the microphone
+ */
+void i2s_init(){
+
+  i2s_driver_uninstall(I2S_PORT);
+  
+  i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM),
+    .sample_rate = I2S_SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 64,
+    .dma_buf_len = 1024,
+    .use_apll = 1
+  };
+
+  i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+
+  const i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_SCK,
+    .ws_io_num = I2S_WS,
+    .data_out_num = -1,
+    .data_in_num = I2S_SD
+  };
+
+  i2s_set_pin(I2S_PORT, &pin_config);
+
+  i2s_set_clk(I2S_PORT, I2S_SAMPLE_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+}
+
+/**
+ * Scales the volume of the recorded data
+ */
+void i2s_adc_data_scale(uint8_t * d_buff, uint8_t* s_buff, uint32_t len)
+{
+    uint32_t j = 0;
+    uint32_t dac_value = 0;
+    for (int i = 0; i < len; i += 2) {
+        dac_value = ((((uint16_t) (s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
+        d_buff[j++] = 0;
+        d_buff[j++] = dac_value * 256 / 2048;
+    }
+}
+
+/**
+ * Function that will used in another thread, this will allow for the
+ * reading and storage of the data
+ */
+void i2s_adc(void *arg)
+{
+    
+    int i2s_read_len = I2S_READ_LEN;
+    int flash_wr_size = 0;
+    size_t bytes_read;
+
+    char* i2s_read_buff = (char*) calloc(i2s_read_len, sizeof(char));
+    uint8_t* flash_write_buff = (uint8_t*) calloc(i2s_read_len, sizeof(char));
+
+    i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+    
+    Serial.println(" *** Recording Start *** ");
+    while (flash_wr_size < FLASH_RECORD_SIZE) {
+        //read data from I2S bus, in this case, from ADC.
+        i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+        //example_disp_buf((uint8_t*) i2s_read_buff, 64);
+        //save original data from I2S(ADC) into flash.
+        i2s_adc_data_scale(flash_write_buff, (uint8_t*)i2s_read_buff, i2s_read_len);
+        audioFile.write((const byte*) i2s_read_buff, i2s_read_len);
+        flash_wr_size += i2s_read_len;
+    }
+    audioFile.close();
+
+    free(i2s_read_buff);
+    i2s_read_buff = NULL;
+    free(flash_write_buff);
+    flash_write_buff = NULL;
+    
+    vTaskDelete(NULL);
+}
+
+
 /**
  * Fill the memory with the corresponding WAV file header.
  */
-void wavHeader(byte* header, int wavSize){
+void wav_header(byte* header, int wavSize){
   header[0] = 'R';
   header[1] = 'I';
   header[2] = 'F';
@@ -360,7 +505,7 @@ void wavHeader(byte* header, int wavSize){
 /**
  * Custom version of delay which waits for GPS data to be read from serial input
  */
-static void smartDelay(unsigned long ms) {
+static void smart_delay(unsigned long ms) {
   unsigned long start = millis();
   do {
     while (ss.available()) gps.encode(ss.read());
