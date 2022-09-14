@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
+
 // GPS Library
 #include <TinyGPSPlus.h>
 
@@ -14,6 +15,10 @@
 // Audio Recording Library and Definitions
 
 #include <driver/i2s.h>
+
+// Base64 Encoding
+#include "Base64.h" 
+#include "mbedtls/base64.h"
 
 #define I2S_WS 0
 #define I2S_SD 34
@@ -36,7 +41,7 @@
 #define UPLOAD_Y 220
 
 // Size of the WAV file header
-const int headerSize = 44;
+const int header_size = 44;
 
 
 
@@ -45,7 +50,11 @@ const char* ssid = "Elevate-41Warren";
 const char* password = "Dyingfromexams";
 
 // Server that will receive the HTTP POST request
-String serverName = "https://2i5agd6rwacftajs3skgtcrlne0vqcgc.lambda-url.ap-southeast-2.on.aws/";
+String gps_server = "https://2i5agd6rwacftajs3skgtcrlne0vqcgc.lambda-url.ap-southeast-2.on.aws/";
+
+String audio_server = "https://7o23bvbwzsw3x6amhc7dyoxgpu0hsdeb.lambda-url.ap-southeast-2.on.aws/";
+
+String audio_join_server = "https://mbash543it367imcz4q7dco6py0tdwcc.lambda-url.ap-southeast-2.on.aws/";
 
 
 
@@ -58,6 +67,8 @@ String AUDIO_LOCATION = "/recording.wav";
 
 const char* AUDIO_LOCATIONS[10] = {"/recording.wav", "/recording1.wav", "/recording2.wav", "/recording3.wav", "/recording4.wav",
       "/recording5.wav", "/recording6.wav", "/recording7.wav", "/recording8.wav", "/recording9.wav"};
+
+const char* INDEXES[10] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
 
 volatile int recording_index = 0;
 
@@ -76,10 +87,6 @@ static const uint32_t GPSBaud = 9600;
 
 //TinyGPS++ Global Object for retrieval of GPS data
 TinyGPSPlus gps;
-
-
-
-
 
 
 
@@ -173,7 +180,7 @@ void loop() {
 
 
 // Global variable of the Object used for Reading and Writing to the Audio file
-File audioFile;
+File audio_file;
 
 // Global variable of the Object used for Reading and Writing to the Log file
 File logs;
@@ -240,17 +247,17 @@ void check_button_A() {
 void check_button_record() {
   TouchPoint_t pos = M5.Touch.getPressPoint();
   if (pos.x != -1) {
-    if (pos.x > 100 && pos.x < 220 && pos.y > 80 && pos.y < 180) {
+    if (pos.x > 100 && pos.x < 220 && pos.y > 95 && pos.y < 195) {
       M5.Axp.SetLDOEnable(3, true);
       if (!button_rec_pressed) {
         if (!recording_enabled) {
-          M5.Lcd.fillCircle(160, 120, 75, GREEN);
+          M5.Lcd.fillCircle(160, 135, 75, GREEN);
 
           prepare_audio_recording();
           
           xTaskCreate(i2s_adc, "i2s_adc", 1024 * 2, NULL, 1, NULL);
         } else {
-          M5.Lcd.fillCircle(160, 120, 75, 0x7bef);
+          M5.Lcd.fillCircle(160, 135, 75, 0x7bef);
         }
         recording_enabled = !recording_enabled;
       }
@@ -265,8 +272,8 @@ void check_button_record() {
  * data for the GPS location of where the recording was made.
  */
 void prepare_audio_recording() {
-  audioFile = LittleFS.open(AUDIO_LOCATIONS[recording_index], FILE_WRITE);
-  if(!audioFile){
+  audio_file = LittleFS.open(AUDIO_LOCATIONS[recording_index], FILE_WRITE);
+  if(!audio_file){
     Serial.println("File is not available!");
   }
 
@@ -278,10 +285,10 @@ void prepare_audio_recording() {
     audio_longitudes[recording_index] = gps.location.lng();
 //  }
 
-  byte header[headerSize];
+  byte header[header_size];
   wav_header(header, FLASH_RECORD_SIZE);
 
-  audioFile.write(header, headerSize);
+  audio_file.write(header, header_size);
 }
 
 /**
@@ -292,7 +299,8 @@ void check_button_C() {
   if (M5.BtnC.wasReleased() || M5.BtnC.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
     if (!button_C_pressed) {
-      publish_HTTP_request();
+      gps_HTTP_request();
+      audio_HTTP_request();
     }
     button_C_pressed = true;
     last_C_time = millis();
@@ -349,8 +357,9 @@ void log_GPS_data() {
     sprintf(dte, "%02d-%02d-%02d", d.year(), d.day(), d.month());
     sprintf(tme, "%02d:%02d:%02d", t.hour(), t.minute(), t.second());
     if (!timestamp_added) {
-      sprintf(timestamp, "%02d-%02d-%02d %02d:%02d:%02d", d.year(), d.day(), d.month(), t.hour(), t.minute(), t.second());
+      sprintf(timestamp, "%02d-%02d-%02d %02d:%02d:%02d", d.year(), d.month(), d.day(), t.hour(), t.minute(), t.second());
       timestamp_added = true;
+      timestamp_UI(timestamp);
     }
   
     append_to_logs();
@@ -416,7 +425,65 @@ volatile bool wifi_connection_attempted = false;
  * 
  * The POST request will send data for GPS Logs and the WAV sound files.
  */
-void publish_HTTP_request() {
+void gps_HTTP_request() {
+
+  if (!wifi_connection_attempted) {
+    WiFi.begin(ssid, password);
+    wifi_connection_attempted = true;
+    Serial.println("WIFI Connection Attempt Established");
+  }
+
+  while(WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if(WiFi.status()== WL_CONNECTED){
+    bool passing = false;
+    do {
+      HTTPClient http;
+    
+      // Your Domain name with URL path or IP address with path
+      http.begin(gps_server);
+  
+      //If you need an HTTP request with a content type: text/plain
+      http.addHeader("Content-Type", "text/plain");
+  
+      http.addHeader("timestamp", "Test Timestamp");
+  
+      http.addHeader("userid", "test");
+  
+      logs = LittleFS.open(LOGS_LOCATION, FILE_READ);
+    
+      uint8_t* log_data = (uint8_t *)ps_calloc(logs.size() + 1, sizeof(char));
+      int i = 0;
+      for (i = 0; i < logs.size(); i++) {
+        log_data[i] = logs.read();
+      }
+      log_data[i] = '\0';
+        
+      logs.close();
+  
+      Serial.println("Publishing Message");
+      
+      int httpResponseCode = http.POST((char*)log_data);
+        
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+
+      passing = httpResponseCode == 200;
+        
+      // End HTTP Connection
+      upload_UI(passing);
+      
+      http.end();
+    } while (!passing);
+  } else {
+    Serial.println("WiFi Disconnected");
+  }
+}
+
+void audio_HTTP_request() {
 
   if (!wifi_connection_attempted) {
     WiFi.begin(ssid, password);
@@ -430,51 +497,139 @@ void publish_HTTP_request() {
   }
   
   if(WiFi.status()== WL_CONNECTED){
-    HTTPClient http;
-  
-    // Your Domain name with URL path or IP address with path
-    http.begin(serverName);
-
-    //If you need an HTTP request with a content type: text/plain
-    http.addHeader("Content-Type", "text/plain");
-
-    http.addHeader("Timestamp", "Test Timestamp");
-
-
-
-    
-
-    logs = LittleFS.open(LOGS_LOCATION, "r");
-  
-    uint8_t* log_data = (uint8_t *)ps_calloc(logs.size() + 1, sizeof(char));
-    int i = 0;
-    for (i = 0; i < logs.size(); i++) {
-      log_data[i] = logs.read();
+    for (int i = 0; i < recording_index; i++) {
+      publish_audio(i);
+      join_audio_data(i);
     }
-    log_data[i] = '\0';
-      
-    logs.close();
-
-
-    
-    
-    int httpResponseCode = http.POST((char*)log_data);
-      
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-      
-    // End HTTP Connection
-    upload_UI(httpResponseCode == 200);
-    
-    http.end();
   } else {
     Serial.println("WiFi Disconnected");
   }
 }
 
+void send_audio_segment(char* audio_data, int audio_index) {
+  bool passing = false;
+  do {
+    HTTPClient http;
+  
+    http.begin(audio_server);
+  
+    http.addHeader("userid", "test");
 
+    http.addHeader("timestamp", timestamp);
 
+    http.addHeader("Content-Type", "text/plain");
 
+    http.addHeader("audioindex", INDEXES[audio_index]);
+  
+    Serial.println("Publishing Message");
+    
+    int httpResponseCode = http.POST((char*)audio_data);
+    
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+
+    passing = httpResponseCode == 200;
+    
+    // End HTTP Connection
+    upload_UI(passing);
+    
+    http.end(); 
+  } while (!passing);
+}
+
+void publish_audio(int audio_index) {
+
+  gps_HTTP_request();
+
+  int segment_size = 16000;
+
+  audio_file = LittleFS.open(AUDIO_LOCATIONS[audio_index], FILE_READ);
+
+  uint8_t* audio_buffer = (uint8_t*)ps_calloc(audio_file.size() + 1, sizeof(char));
+
+  int i = 0;
+  for (i = 0; i < audio_file.size(); i++) {
+    audio_buffer[i] = audio_file.read();
+  }
+  audio_buffer[i] = '\0';
+
+  int encoded_buffer_length = audio_file.size() * 2;
+  uint8_t* encoded_audio_buffer = (uint8_t*)ps_calloc(encoded_buffer_length, sizeof(char));
+
+  size_t length;
+
+  int error = mbedtls_base64_encode(encoded_audio_buffer, encoded_buffer_length, &length,
+                                    (const byte*)audio_buffer, audio_file.size() + 1);
+
+  audio_file.close();
+  free(audio_buffer);
+
+  i = 0;
+  while (i + segment_size < length) {
+    Serial.println("Starting Segment");
+    uint8_t* audio_data = (uint8_t*)ps_calloc(segment_size + 100, sizeof(char));
+    int j = 0;
+    for (j = 0; j < segment_size; j++) {
+      audio_data[j] = encoded_audio_buffer[i + j];
+    }
+    audio_data[j] = '\0';
+    
+    send_audio_segment((char*)audio_data, audio_index);
+
+    free(audio_data);
+
+    i += segment_size;
+    Serial.println("Finishing Segment");
+  }
+
+  Serial.println("Starting Last Message");
+
+  uint8_t* audio_data = (uint8_t *)ps_calloc(segment_size + 100, sizeof(char));
+
+  int j = 0;
+  for (j = 0; j < length - i; j++) {
+    audio_data[j] = encoded_audio_buffer[i + j];
+  }
+  audio_data[j] = '\0';
+
+  send_audio_segment((char*)audio_data, audio_index);
+
+  Serial.println("Finishing Last Message");
+
+  free(audio_data);
+  free(encoded_audio_buffer);
+}
+
+void join_audio_data(int audio_index) {
+  bool passing = false;
+  do {
+    HTTPClient http;
+  
+    http.begin(audio_join_server);
+  
+    http.addHeader("userid", "test");
+
+    http.addHeader("timestamp", timestamp);
+
+    http.addHeader("Content-Type", "text/plain");
+
+    http.addHeader("audioindex", INDEXES[audio_index]);
+
+    Serial.println("Publishing Message");
+  
+    int httpResponseCode = http.GET();
+          
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+
+    passing = httpResponseCode == 200;
+    
+    // End HTTP Connection
+    upload_UI(passing);
+    
+    http.end(); 
+  } while (!passing);
+}
 
 
 
@@ -559,10 +714,10 @@ void i2s_adc(void *arg)
     //example_disp_buf((uint8_t*) i2s_read_buff, 64);
     //save original data from I2S(ADC) into flash.
     i2s_adc_data_scale(flash_write_buff, (uint8_t*)i2s_read_buff, i2s_read_len);
-    audioFile.write((const byte*) i2s_read_buff, i2s_read_len);
+    audio_file.write((const byte*) i2s_read_buff, i2s_read_len);
     flash_wr_size += i2s_read_len;
   }
-  audioFile.close();
+  audio_file.close();
 
   free(i2s_read_buff);
   i2s_read_buff = NULL;
@@ -579,16 +734,16 @@ void i2s_adc(void *arg)
 /**
  * Fills the memory with the corresponding WAV file header.
  */
-void wav_header(byte* header, int wavSize){
+void wav_header(byte* header, int wav_size){
   header[0] = 'R';
   header[1] = 'I';
   header[2] = 'F';
   header[3] = 'F';
-  unsigned int fileSize = wavSize + headerSize - 8;
-  header[4] = (byte)(fileSize & 0xFF);
-  header[5] = (byte)((fileSize >> 8) & 0xFF);
-  header[6] = (byte)((fileSize >> 16) & 0xFF);
-  header[7] = (byte)((fileSize >> 24) & 0xFF);
+  unsigned int file_size = wav_size + header_size - 8;
+  header[4] = (byte)(file_size & 0xFF);
+  header[5] = (byte)((file_size >> 8) & 0xFF);
+  header[6] = (byte)((file_size >> 16) & 0xFF);
+  header[7] = (byte)((file_size >> 24) & 0xFF);
   header[8] = 'W';
   header[9] = 'A';
   header[10] = 'V';
@@ -621,10 +776,10 @@ void wav_header(byte* header, int wavSize){
   header[37] = 'a';
   header[38] = 't';
   header[39] = 'a';
-  header[40] = (byte)(wavSize & 0xFF);
-  header[41] = (byte)((wavSize >> 8) & 0xFF);
-  header[42] = (byte)((wavSize >> 16) & 0xFF);
-  header[43] = (byte)((wavSize >> 24) & 0xFF);
+  header[40] = (byte)(wav_size & 0xFF);
+  header[41] = (byte)((wav_size >> 8) & 0xFF);
+  header[42] = (byte)((wav_size >> 16) & 0xFF);
+  header[43] = (byte)((wav_size >> 24) & 0xFF);
 
 }
 
@@ -641,11 +796,18 @@ void wav_header(byte* header, int wavSize){
 void initiate_display() {
   M5.Lcd.fillScreen(BLACK);
 
-  M5.Lcd.setCursor(127, 15);
+  M5.Lcd.setCursor(95, 10);
+  M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.printf("TIMESTAMP: ");
+  M5.Lcd.setTextColor(RED);
+  M5.Lcd.printf("UNAVAILABLE");
+
   M5.Lcd.setTextSize(2);
+  M5.Lcd.setCursor(125, 30);
+  M5.Lcd.setTextColor(WHITE);
   M5.Lcd.printf("RECORD");
-  M5.Lcd.fillCircle(160, 120, 75, 0x7bef);
+  M5.Lcd.fillCircle(160, 135, 75, 0x7bef);
 
   enable_gps_UI();
 
@@ -682,6 +844,17 @@ void upload_UI(bool successful) {
   M5.Lcd.printf("UPLOAD");
 }
 
+/**
+ * Updates the UI of the Upload label depending on
+ * the status of the HTTP message
+ */
+void timestamp_UI(char* timestamp) {
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.printf("TIMESTAMP: ");
+  M5.Lcd.setTextColor(GREEN);
+  M5.Lcd.printf(timestamp);
+}
 
 
 
