@@ -63,12 +63,8 @@ String audio_join_server = "https://mbash543it367imcz4q7dco6py0tdwcc.lambda-url.
 String LOGS_LOCATION = "/logs.txt";
 
 // Location where Audio Files will be stored for a single hike
-String AUDIO_LOCATION = "/recording.wav";
-
 const char* AUDIO_LOCATIONS[10] = {"/recording.wav", "/recording1.wav", "/recording2.wav", "/recording3.wav", "/recording4.wav",
       "/recording5.wav", "/recording6.wav", "/recording7.wav", "/recording8.wav", "/recording9.wav"};
-
-const char* INDEXES[10] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
 
 volatile int recording_index = 0;
 
@@ -101,6 +97,9 @@ void setup() {
 
   // GPS Setup
   ss.begin(GPSBaud, SERIAL_8N1, 33, 32);
+
+  WiFi.mode(WIFI_STA);
+
 
   // LittleFS Setup
   format_LittleFS();
@@ -299,7 +298,7 @@ void check_button_C() {
   if (M5.BtnC.wasReleased() || M5.BtnC.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
     if (!button_C_pressed) {
-      gps_HTTP_request();
+//      gps_HTTP_request();
       audio_HTTP_request();
     }
     button_C_pressed = true;
@@ -426,7 +425,7 @@ volatile bool wifi_connection_attempted = false;
  * The POST request will send data for GPS Logs and the WAV sound files.
  */
 void gps_HTTP_request() {
-
+  
   if (!wifi_connection_attempted) {
     WiFi.begin(ssid, password);
     wifi_connection_attempted = true;
@@ -449,7 +448,7 @@ void gps_HTTP_request() {
       //If you need an HTTP request with a content type: text/plain
       http.addHeader("Content-Type", "text/plain");
   
-      http.addHeader("timestamp", "Test Timestamp");
+      http.addHeader("timestamp", timestamp);
   
       http.addHeader("userid", "test");
   
@@ -499,15 +498,20 @@ void audio_HTTP_request() {
   if(WiFi.status()== WL_CONNECTED){
     for (int i = 0; i < recording_index; i++) {
       publish_audio(i);
-      join_audio_data(i);
+//      join_audio_data(i);
     }
   } else {
     Serial.println("WiFi Disconnected");
   }
 }
 
-void send_audio_segment(char* audio_data, int audio_index) {
-  bool passing = false;
+void send_audio_segment(char* audio_data, int audio_index, int segment_index) {
+  bool passing = false;  
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WIFI NOT CONNECTED");
+  }
+  
   do {
     HTTPClient http;
   
@@ -519,14 +523,21 @@ void send_audio_segment(char* audio_data, int audio_index) {
 
     http.addHeader("Content-Type", "text/plain");
 
-    http.addHeader("audioindex", INDEXES[audio_index]);
-  
+    char index_buffer[10];
+    sprintf(index_buffer, "%d", audio_index);
+    http.addHeader("audioindex", index_buffer);
+
+    sprintf(index_buffer, "%d", segment_index);
+    http.addHeader("segmentindex", index_buffer);
+
     Serial.println("Publishing Message");
     
     int httpResponseCode = http.POST((char*)audio_data);
     
     Serial.print("HTTP Response code: ");
     Serial.println(httpResponseCode);
+    Serial.print("HTTP Response Message: ");
+    Serial.println(http.getString());
 
     passing = httpResponseCode == 200;
     
@@ -534,12 +545,10 @@ void send_audio_segment(char* audio_data, int audio_index) {
     upload_UI(passing);
     
     http.end(); 
-  } while (!passing);
+  } while (false);//!passing);
 }
 
 void publish_audio(int audio_index) {
-
-  gps_HTTP_request();
 
   int segment_size = 16000;
 
@@ -564,9 +573,13 @@ void publish_audio(int audio_index) {
   audio_file.close();
   free(audio_buffer);
 
+  Serial.println(length);
+
   i = 0;
+  int segment_index = 0;
   while (i + segment_size < length) {
-    Serial.println("Starting Segment");
+    Serial.print("Starting Segment ");
+    Serial.println(segment_index);
     uint8_t* audio_data = (uint8_t*)ps_calloc(segment_size + 100, sizeof(char));
     int j = 0;
     for (j = 0; j < segment_size; j++) {
@@ -574,12 +587,14 @@ void publish_audio(int audio_index) {
     }
     audio_data[j] = '\0';
     
-    send_audio_segment((char*)audio_data, audio_index);
+    send_audio_segment((char*)audio_data, audio_index, segment_index);
 
     free(audio_data);
 
     i += segment_size;
+    segment_index++;
     Serial.println("Finishing Segment");
+    delay(200);
   }
 
   Serial.println("Starting Last Message");
@@ -592,7 +607,7 @@ void publish_audio(int audio_index) {
   }
   audio_data[j] = '\0';
 
-  send_audio_segment((char*)audio_data, audio_index);
+  send_audio_segment((char*)audio_data, audio_index, segment_index);
 
   Serial.println("Finishing Last Message");
 
@@ -612,8 +627,10 @@ void join_audio_data(int audio_index) {
     http.addHeader("timestamp", timestamp);
 
     http.addHeader("Content-Type", "text/plain");
-
-    http.addHeader("audioindex", INDEXES[audio_index]);
+    
+    char index_buffer[10];
+    sprintf(index_buffer, "%d", audio_index);
+    http.addHeader("audioindex", index_buffer);
 
     Serial.println("Publishing Message");
   
@@ -702,6 +719,9 @@ void i2s_adc(void *arg)
 
   char* i2s_read_buff = (char*) calloc(i2s_read_len, sizeof(char));
   uint8_t* flash_write_buff = (uint8_t*) calloc(i2s_read_len, sizeof(char));
+
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
 
   i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
   i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
@@ -811,6 +831,7 @@ void initiate_display() {
 
   enable_gps_UI();
 
+  M5.Lcd.setTextSize(2);
   M5.Lcd.setCursor(UPLOAD_X, UPLOAD_Y); 
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.printf("UPLOAD");
@@ -835,6 +856,7 @@ void enable_gps_UI() {
  * the status of the HTTP message
  */
 void upload_UI(bool successful) {
+  M5.Lcd.setTextSize(2);
   M5.Lcd.setCursor(UPLOAD_X, UPLOAD_Y);
   if (successful) {
     M5.Lcd.setTextColor(GREEN);
@@ -849,7 +871,16 @@ void upload_UI(bool successful) {
  * the status of the HTTP message
  */
 void timestamp_UI(char* timestamp) {
-  M5.Lcd.setCursor(0, 0);
+
+  M5.Lcd.setCursor(95, 10);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.setTextColor(BLACK);
+  M5.Lcd.printf("TIMESTAMP: ");
+  M5.Lcd.setTextColor(BLACK);
+  M5.Lcd.printf("UNAVAILABLE");
+
+  M5.Lcd.setCursor(75, 10);
+  M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.printf("TIMESTAMP: ");
   M5.Lcd.setTextColor(GREEN);
