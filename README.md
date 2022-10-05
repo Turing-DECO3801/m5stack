@@ -1,10 +1,17 @@
 # M5STACK CORE2 GPS Tracking, Voice Recording and Upload to AWS
 
+
+
 ## Device
 
+<p align="center" width="100%">
+  <img style="width:35%;" src="https://user-images.githubusercontent.com/86467852/194073329-e4f087b5-56d3-4f1d-bb0a-2bd5108f0e92.png" />
+</p>
 The hardware device that has been used as the prototype for data recording was the M5STACK CORE2 due to its small form factor and built-in functions such as the microphone and easily attachable sensors like the GPS sensor. The device uses an ESP32 microcontroller that is capable of WIFI connections and is compatible with numerous libraries that were required for the overall product.
 
 ## Functionality
+
+![image](https://user-images.githubusercontent.com/86467852/194072697-dbefc976-19df-4449-858a-f4254b5fdb78.png)
 
 ### UI
 The User Interface of the Hardware device has been made to imitate that of the ideal version of the device. The UI of the device has been kept simple to allow users to handle and interact with the device with only a single hand and without having to fiddle or adjust it. Some UI features are the 3 buttons, a large audio recording to be done without being seen and 2 smaller ones to start GPS logging and to upload. The UI also has visual and haptic feedback for button presses and to signal when audio or GPS data is being recorded.
