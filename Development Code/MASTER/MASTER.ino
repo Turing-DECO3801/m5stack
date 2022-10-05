@@ -276,13 +276,13 @@ void prepare_audio_recording() {
     Serial.println("File is not available!");
   }
 
-//  if (gps.location.isValid()) {
+  if (gps.location.isValid()) {
     smart_delay(0);
     audio_latitudes[recording_index] = gps.location.lat();
   
     smart_delay(0);
     audio_longitudes[recording_index] = gps.location.lng();
-//  }
+  }
 
   byte header[header_size];
   wav_header(header, FLASH_RECORD_SIZE);
@@ -298,7 +298,7 @@ void check_button_C() {
   if (M5.BtnC.wasReleased() || M5.BtnC.pressedFor(0, 200)) {
     M5.Axp.SetLDOEnable(3, true);
     if (!button_C_pressed) {
-//      gps_HTTP_request();
+      gps_HTTP_request();
       audio_HTTP_request();
     }
     button_C_pressed = true;
@@ -323,6 +323,8 @@ bool timestamp_added = false;
 
 // Location for the storage of the timestamp
 char timestamp[48];
+
+char end_timestamp[48];
 
 // Latitude used for logs
 float lat;
@@ -355,12 +357,13 @@ void log_GPS_data() {
     
     sprintf(dte, "%02d-%02d-%02d", d.year(), d.day(), d.month());
     sprintf(tme, "%02d:%02d:%02d", t.hour(), t.minute(), t.second());
+    sprintf(end_timestamp, "%02d-%02d-%02d %02d:%02d:%02d", d.year(), d.month(), d.day(), t.hour(), t.minute(), t.second());
     if (!timestamp_added) {
       sprintf(timestamp, "%02d-%02d-%02d %02d:%02d:%02d", d.year(), d.month(), d.day(), t.hour(), t.minute(), t.second());
       timestamp_added = true;
       timestamp_UI(timestamp);
     }
-  
+      
     append_to_logs();
   }
 }
@@ -449,6 +452,8 @@ void gps_HTTP_request() {
       http.addHeader("Content-Type", "text/plain");
   
       http.addHeader("timestamp", timestamp);
+
+      http.addHeader("endtimestamp", end_timestamp);
   
       http.addHeader("userid", "test");
   
@@ -476,6 +481,8 @@ void gps_HTTP_request() {
       upload_UI(passing);
       
       http.end();
+
+      delay(2000);
     } while (!passing);
   } else {
     Serial.println("WiFi Disconnected");
@@ -498,7 +505,7 @@ void audio_HTTP_request() {
   if(WiFi.status()== WL_CONNECTED){
     for (int i = 0; i < recording_index; i++) {
       publish_audio(i);
-//      join_audio_data(i);
+      join_audio_data(i);
     }
   } else {
     Serial.println("WiFi Disconnected");
@@ -594,7 +601,7 @@ void publish_audio(int audio_index) {
     i += segment_size;
     segment_index++;
     Serial.println("Finishing Segment");
-    delay(200);
+    delay(2000);
   }
 
   Serial.println("Starting Last Message");
@@ -631,6 +638,14 @@ void join_audio_data(int audio_index) {
     char index_buffer[10];
     sprintf(index_buffer, "%d", audio_index);
     http.addHeader("audioindex", index_buffer);
+
+    char latitude_buffer[20];
+    sprintf(latitude_buffer, "%f", audio_latitudes[audio_index]);
+    http.addHeader("latitude", latitude_buffer);
+
+    char longitude_buffer[20];
+    sprintf(longitude_buffer, "%f", audio_longitudes[audio_index]);
+    http.addHeader("longitude", longitude_buffer);
 
     Serial.println("Publishing Message");
   
@@ -725,6 +740,9 @@ void i2s_adc(void *arg)
 
   i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
   i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+  i2s_read(I2S_PORT, (void*) i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
   
   Serial.println(" *** Recording Start *** ");
   
@@ -744,7 +762,7 @@ void i2s_adc(void *arg)
   free(flash_write_buff);
   flash_write_buff = NULL;
 
-  recording_index += 1;
+  recording_index++;
   Serial.println(" *** Recording Finish *** ");
   
   vTaskDelete(NULL);
