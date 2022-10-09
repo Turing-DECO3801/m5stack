@@ -60,7 +60,9 @@ The upload of data with the device requires a stable internet connection which t
 
 ### M5CORE2 Library
 
-This library was the default library that was provided by M5STACK to program the UI of the device. This library allowed for haptic feedback in the form of vibrations, audio feedback and input through the touch screen display and extra buttons.
+[M5CORE2](https://github.com/m5stack/M5Core2)
+
+This library was the default library that was provided by M5STACK to program the UI of the device. This library allowed for haptic feedback in the form of vibrations, audio feedback and input through the touch screen display and extra buttons. This library also provided base code to other features such as the file system LittleFS and GPS example code that was adapted to the use seen in the current program.
 
 ### WIFI, HTTPClient and BASE64/mbedtls
 
@@ -82,5 +84,5 @@ The TinyGPSPlus library was used with the external GPS sensor that was attached 
 
 ### LittleFS
 
-LittleFS was the file system that was used to store GPS logs and Audio recordings.
+LittleFS was the file system that was used to store GPS logs and Audio recordings. An alternate system was used before called SPIFFS but this file system was far too slow and would often cause data logged to be corrupted or missing.
 
