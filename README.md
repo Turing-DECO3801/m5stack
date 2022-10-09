@@ -64,11 +64,17 @@ This library was the default library that was provided by M5STACK to program the
 
 ### WIFI, HTTPClient and BASE64/mbedtls
 
+[HttpClient Documentation](https://github.com/amcewen/HttpClient/)
+
 The WIFI and HTTPClient were used for connection to the AWS Lambda functions to upload GPS logs and audio data. The BASE64 library was used when uploading the data to ensure that there was no loss or errors in the raw data that was being transferred so it was first converted to this encoding and would be later decoded on the Severless Functions.
 
-### I2S 
+### I2S
 
-The I2S library allows the device to convert raw audio data from the internal microphone and convert it and store it as a WAV file.
+[I2S Microphone](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/i2s)
+
+[I2S Recording Example Code](https://github.com/0015/ThatProject/blob/master/ESP32_MICROPHONE/ESP32_INMP441_RECORDING/ESP32_INMP441_RECORDING.ino)
+
+The I2S library allows the device to convert raw audio data from the internal microphone and convert it and store it as a WAV file. The documentation and code provided 
 
 ### TinyGPSPlus
 
