@@ -10,21 +10,18 @@ After obtaining the device, the first thing required is to download the Arduino 
 
 Before compilation and programming of the device, settings on the device such as the servers that the device will attempt to send HTTP requests to and the WIFI connection must be made prior to the compilation of the device.
 
-```
-String gps_server = "________________________________";
+### `String gps_server = "________________________________";`
 
-String audio_server = "________________________________";
+### `String audio_server = "________________________________";`
 
-String audio_join_server = "________________________________";
-```
+### `String audio_join_server = "________________________________";`
 
 Connection of the WIFI must also be established, providing the SSID and Password for the connection
 
-```
-const char* ssid = "________________________________";
+### `const char* ssid = "________________________________";`
 
-const char* password = "________________________________";
-```
+### `const char* password = "________________________________";`
+
 
 After installation, the program will need to be compiled and programmed onto the ESP32 device through a USB3 to USBC cable.
 
