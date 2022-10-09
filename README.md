@@ -1,6 +1,32 @@
-# M5STACK CORE2 GPS Tracking, Voice Recording and Upload to AWS
+# M5Stack CORE2 Hardware Device
 
+## How To Use
 
+To use the provided code, a combined version of all the code can be found in the DevelopmentCode/MASTER directory as well as other programs that were created to assist in the development of the final file.
+
+After obtaining the device, the first thing required is to download the Arduino IDE, the ESPTOOL Drivers and any required libraries as found at the bottom of the page within the Arduino Library and Program manager.
+
+[CORE2 Installation Guide](https://docs.m5stack.com/en/quick_start/core2_for_aws/arduino)
+
+Before compilation and programming of the device, settings on the device such as the servers that the device will attempt to send HTTP requests to and the WIFI connection must be made prior to the compilation of the device.
+
+```
+String gps_server = "________________________________";
+
+String audio_server = "________________________________";
+
+String audio_join_server = "________________________________";
+```
+
+Connection of the WIFI must also be established, providing the SSID and Password for the connection
+
+```
+const char* ssid = "________________________________";
+
+const char* password = "________________________________";
+```
+
+After installation, the program will need to be compiled and programmed onto the ESP32 device through a USB3 to USBC cable.
 
 ## Device
 
